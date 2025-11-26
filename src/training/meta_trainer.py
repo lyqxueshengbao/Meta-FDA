@@ -47,11 +47,16 @@ class MetaTrainer:
         # 使用混合损失
         self.loss_fn = ComplexHybridLoss(lambda1=0.3, lambda2=0.5)
 
+        # 训练任务配置 (使用 SIR 定义)
+        # SIR = -10dB 表示干扰是信号的 10 倍
+        # SIR = -20dB 表示干扰是信号的 100 倍
         self.train_tasks = [
-            {'type': 'DFTJ', 'snr': 0, 'jnr': 0},
-            {'type': 'ISRJ', 'snr': 0, 'jnr': 0},
-            {'type': 'DFTJ', 'snr': -5, 'jnr': -5},
-            {'type': 'SRJ', 'snr': 0, 'jnr': 0},
+            {'type': 'DFTJ', 'snr': 0, 'sir': -5},      # 干扰≈3x信号
+            {'type': 'ISRJ', 'snr': 0, 'sir': -5},
+            {'type': 'DFTJ', 'snr': -5, 'sir': -10},   # 干扰≈10x信号
+            {'type': 'SRJ', 'snr': -5, 'sir': -10},
+            {'type': 'DFTJ', 'snr': -10, 'sir': -15},  # 干扰≈32x信号
+            {'type': 'ISRJ', 'snr': -10, 'sir': -20},  # 干扰≈100x信号
         ]
 
         print(f"✅ Meta Trainer Initialized")
@@ -76,7 +81,7 @@ class MetaTrainer:
 
                 # Support Set
                 sx, sy = self.simulator.generate_batch(
-                    k_shot, task['type'], task['snr'], task['jnr']
+                    k_shot, task['type'], task['snr'], task['sir']
                 )
                 sx, sy = sx.to(self.device), sy.to(self.device)
 
@@ -88,7 +93,7 @@ class MetaTrainer:
 
                 # Query Set
                 qx, qy = self.simulator.generate_batch(
-                    k_shot, task['type'], task['snr'], task['jnr']
+                    k_shot, task['type'], task['snr'], task['sir']
                 )
                 qx, qy = qx.to(self.device), qy.to(self.device)
 
@@ -124,14 +129,21 @@ class MetaTrainer:
         corr = (p * t).sum(dim=1) / p.shape[1]
         return corr.mean().item()
 
-    def test_adaptation(self, target_jamming='SJ', snr=-10, jnr=-10, k_shots=10):
+    def test_adaptation(self, target_jamming='SJ', snr=-10, sir=-10, k_shots=10):
+        """
+        测试少样本适应能力
+        
+        参数:
+            sir: Signal-to-Interference Ratio (dB)
+                 SIR = -25dB 表示干扰功率是信号的 316 倍 (论文标准条件)
+        """
         print(f"\n{'=' * 40}")
-        print(f"🧪 Testing Adaptation: {target_jamming} (K={k_shots})")
+        print(f"🧪 Testing: {target_jamming} | SNR={snr}dB, SIR={sir}dB | K={k_shots}")
         print(f"{'=' * 40}")
 
         # Support & Test Sets
-        sx, sy = self.simulator.generate_batch(k_shots, target_jamming, snr, jnr)
-        tx, ty = self.simulator.generate_batch(50, target_jamming, snr, jnr)
+        sx, sy = self.simulator.generate_batch(k_shots, target_jamming, snr, sir)
+        tx, ty = self.simulator.generate_batch(50, target_jamming, snr, sir)
         sx, sy = sx.to(self.device), sy.to(self.device)
         tx, ty = tx.to(self.device), ty.to(self.device)
 

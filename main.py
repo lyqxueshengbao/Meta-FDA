@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os
 import json
 from src.simulation.radar_env import FDARadarSimulator
-from src.models.backbone import JammingSuppressionNet
+from src.models.uc_cnn import UCCNN
 from src.training.meta_trainer import MetaTrainer
 
 os.makedirs('checkpoints', exist_ok=True)
@@ -69,8 +69,9 @@ def main():
     print(f"🚀 Mode: {args.mode} | Device: {device} | K-Shot: {args.k_shot}")
 
     # Init Modules
-    simulator = FDARadarSimulator(M=4, N=4)
-    model = JammingSuppressionNet(in_channels=16)
+    simulator = FDARadarSimulator(M=4, N=4, n_range=64, n_angle=64)
+    # UC-CNN: 2 channels (Real + Imag) for Range-Angle Map
+    model = UCCNN(in_channels=1, out_channels=1)  # 1 complex channel = 2 real channels
     trainer = MetaTrainer(model, simulator, device)
 
     if args.mode == 'train':
@@ -94,19 +95,33 @@ def main():
         except:
             print("⚠️ No checkpoint found, using random initialization.")
 
-        # Test on unseen jamming (SJ)
-        results = trainer.test_adaptation(
-            target_jamming='SJ',
-            snr=-5,
-            jnr=-10,
-            k_shots=args.k_shot
-        )
-
+        # Test on DFTJ (主瓣欺骗干扰) - 论文主要测试场景
+        print("\n" + "="*60)
+        print("🔬 TEST: DFTJ (Mainlobe Deceptive Jamming)")
+        print("   Paper Standard Condition: SNR=-10dB, SIR=-25dB")
+        print("="*60)
+        
+        # 测试不同 SIR 条件
+        for sir in [0, -5, -10, -15, -20, -25]:
+            results = trainer.test_adaptation(
+                target_jamming='DFTJ',  # 主瓣欺骗干扰
+                snr=-10,
+                sir=sir,
+                k_shots=args.k_shot
+            )
+            zero_corr = results['zero_shot']['corr']
+            final_corr = results['few_shot']['corrs'][-1]
+            ratio = 10**(-sir/10)
+            improvement = (final_corr - zero_corr) / abs(zero_corr) * 100 if zero_corr != 0 else 0
+            print(f"SIR={sir:3d}dB (干扰{ratio:6.1f}x信号): Zero={zero_corr:.4f} → Few={final_corr:.4f} (+{improvement:.1f}%)")
+        
+        # 选择 SIR=-25dB 作图
+        results = trainer.test_adaptation('DFTJ', snr=-10, sir=-25, k_shots=args.k_shot)
         plot_adapt(results, args.k_shot)
 
         # 打印详细结果
         print(f"\n{'=' * 50}")
-        print(f"📊 Final Results Summary:")
+        print(f"📊 Final Results Summary (SIR=-25dB):")
         print(f"{'=' * 50}")
         print(f"Zero-Shot Performance:")
         print(f"  - Loss: {results['zero_shot']['loss']:.5f}")
@@ -114,12 +129,6 @@ def main():
         print(f"\nFew-Shot Performance (After {len(results['few_shot']['corrs'])} steps):")
         print(f"  - Loss: {results['few_shot']['losses'][-1]:.5f}")
         print(f"  - Correlation: {results['few_shot']['corrs'][-1]:.4f}")
-
-        improvement = (results['few_shot']['corrs'][-1] - results['zero_shot']['corr'])
-        improvement_pct = improvement / abs(results['zero_shot']['corr']) * 100
-        print(f"\n📈 Improvement:")
-        print(f"  - Absolute: +{improvement:.4f}")
-        print(f"  - Relative: +{improvement_pct:.1f}%")
 
 
 if __name__ == "__main__":

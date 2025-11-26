@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os
 import json
 from src.simulation.radar_env import FDARadarSimulator
-from src.models.uc_cnn import UCCNN
+from src.models.uc_cnn_paper import UCCNN_Paper
 from src.training.meta_trainer import MetaTrainer
 
 os.makedirs('checkpoints', exist_ok=True)
@@ -69,9 +69,9 @@ def main():
     print(f"🚀 Mode: {args.mode} | Device: {device} | K-Shot: {args.k_shot}")
 
     # Init Modules
-    simulator = FDARadarSimulator(M=4, N=4, n_range=64, n_angle=64)
-    # UC-CNN: 2 channels (Real + Imag) for Range-Angle Map
-    model = UCCNN(in_channels=1, out_channels=1)  # 1 complex channel = 2 real channels
+    simulator = FDARadarSimulator(M=4, N=4)
+    # UC-CNN (论文版): 16 虚拟通道 STFT 输入
+    model = UCCNN_Paper(in_channels=16)  # 16 complex channels = 32 real channels
     trainer = MetaTrainer(model, simulator, device)
 
     if args.mode == 'train':

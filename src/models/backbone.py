@@ -6,9 +6,10 @@ from .layers import ComplexConv2d
 
 class JammingSuppressionNet(nn.Module):
     """
-    修复版 U-Net (v2.1):
-    1. 彻底移除了硬编码的残差连接 (out + x * 0.1)
-    2. 保持了 LeakyReLU 和 Skip Connections
+    修复版 U-Net:
+    1. 可学习的残差权重
+    2. 更鲁棒的跳跃连接
+    3. 改进的激活函数
     """
 
     def __init__(self, in_channels=16):
@@ -18,8 +19,7 @@ class JammingSuppressionNet(nn.Module):
         self.enc1 = nn.Sequential(
             ComplexConv2d(in_channels, 32),
             nn.BatchNorm2d(64),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout2d(0.1)
+            nn.LeakyReLU(0.2, inplace=True)
         )
         self.pool1 = nn.MaxPool2d(2)
 
@@ -55,33 +55,43 @@ class JammingSuppressionNet(nn.Module):
         # Output
         self.out_conv = ComplexConv2d(32, in_channels)
 
+        # 可学习的残差权重
+        self.residual_weight = nn.Parameter(torch.tensor(0.3))
+
+    def _align_size(self, x, target):
+        """鲁棒的尺寸对齐"""
+        if x.shape[2:] != target.shape[2:]:
+            x = F.interpolate(x, size=target.shape[2:],
+                              mode='bilinear', align_corners=False)
+        return x
+
     def forward(self, x):
         # Encoder
         e1 = self.enc1(x)
         p1 = self.pool1(e1)
+
         e2 = self.enc2(p1)
         p2 = self.pool2(e2)
 
         # Bottleneck
         b = self.bottleneck(p2)
 
-        # Decoder
+        # Decoder with Skip Connections
         d1 = self.up1(b)
-        if d1.shape[2:] != e2.shape[2:]:
-            d1 = F.interpolate(d1, size=e2.shape[2:], mode='bilinear', align_corners=False)
+        d1 = self._align_size(d1, e2)
         d1 = torch.cat([d1, e2], dim=1)
         d1 = self.dec1(d1)
 
         d2 = self.up2(d1)
-        if d2.shape[2:] != e1.shape[2:]:
-            d2 = F.interpolate(d2, size=e1.shape[2:], mode='bilinear', align_corners=False)
+        d2 = self._align_size(d2, e1)
         d2 = torch.cat([d2, e1], dim=1)
         d2 = self.dec2(d2)
 
         # Output
         out = self.out_conv(d2)
 
-        # ✅【关键修改】删除了 out = out + x * 0.1
-        # 纯净输出，不再混合噪声
+        # 可学习的残差连接
+        weight = torch.sigmoid(self.residual_weight)
+        out = out + x * weight
 
         return out
